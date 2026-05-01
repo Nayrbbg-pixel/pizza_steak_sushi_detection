@@ -36,14 +36,14 @@ async def lifespan(app):
 
     #initializing the food model
     food_model = FoodDetectionModel(in_channels=3, hidden_units=12)
-    food_model.load_state_dict(torch.load('./foodMode.pth', map_location=torch.device('cpu')))
+    food_model.load_state_dict(torch.load('./models/foodMode.pth', map_location=torch.device('cpu')))
     food_model.eval()
 
     #initializing the spam encoder
     spam_model_encoder = SentenceTransformer('all-MiniLM-L6-v2')
 
     #initializing the spam model
-    spam_model = joblib.load('./spam_detection_model.joblib')
+    spam_model = joblib.load('./models/spam_predictor4.joblib')
 
     yield
     food_model=None
@@ -86,5 +86,9 @@ class SpamInput(BaseModel):
 def spam_detection(input_data: SpamInput):
     processed_str = pre_process_spam(input_data.text)
     prediction = spam_model.predict(processed_str)
+    # probability = np.max(spam_model.predict_proba(processed_str))
     
-    return {'is_spam': prediction[0]}
+    print(prediction)
+    return {"is_spam": bool(prediction[0]),
+            # "probability":f"{probability:.2f*100}%"
+            }

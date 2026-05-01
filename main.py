@@ -11,8 +11,15 @@ from torchvision import transforms
 import PIL.Image as Image
 import io
 from enum import Enum
+import joblib
+from sentence_transformers import SentenceTransformer
+import numpy as np
+from pydantic import BaseModel, Field
 
-model = None
+food_model = None
+spam_model_encoder = None
+spam_model = None
+
 
 test_data_transforms = transforms.Compose([
     transforms.Resize((64,64)),
@@ -23,12 +30,25 @@ test_data_transforms = transforms.Compose([
 
 @asynccontextmanager
 async def lifespan(app):
-    global model
-    model = FoodDetectionModel(in_channels=3, hidden_units=12)
-    model.load_state_dict(torch.load('./foodMode.pth', map_location=torch.device('cpu')))
-    model.eval()
+    global food_model
+    global spam_model
+    global spam_model_encoder
+
+    #initializing the food model
+    food_model = FoodDetectionModel(in_channels=3, hidden_units=12)
+    food_model.load_state_dict(torch.load('./foodMode.pth', map_location=torch.device('cpu')))
+    food_model.eval()
+
+    #initializing the spam encoder
+    spam_model_encoder = SentenceTransformer('all-MiniLM-L6-v2')
+
+    #initializing the spam model
+    spam_model = joblib.load('./spam_detection_model.joblib')
+
     yield
-    model=None
+    food_model=None
+    spam_model_encoder=None
+    spam_model=None
 
 app = FastAPI(lifespan=lifespan, docs_url='/')
 
@@ -48,7 +68,7 @@ def predict(file:UploadFile=File(...)):
     transformed_image = pre_processing(file)
     
     with torch.inference_mode():
-        logits = model(transformed_image.unsqueeze(dim=0))
+        logits = food_model(transformed_image.unsqueeze(dim=0))
         pred_probs = torch.softmax(logits, dim=1)
         pred_label = torch.argmax(pred_probs, dim=1)
         pred_class = Classes(pred_label.item())
@@ -56,3 +76,15 @@ def predict(file:UploadFile=File(...)):
 
     return {'FOOD NAME':pred_class}
 
+def pre_process_spam(str:str):
+    return spam_model_encoder.encode(str).reshape(1,-1)
+
+class SpamInput(BaseModel):
+    text: str=Field(...)
+
+@app.post('/spam_detection')
+def spam_detection(input_data: SpamInput):
+    processed_str = pre_process_spam(input_data.text)
+    prediction = spam_model.predict(processed_str)
+    
+    return {'is_spam': prediction[0]}
